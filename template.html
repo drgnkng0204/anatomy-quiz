@@ -101,6 +101,8 @@ th:first-child,td:first-child{text-align:left}
 th{font-weight:500;color:var(--muted);font-size:.78rem}
 .tw{overflow-x:auto}
 textarea{width:100%;min-height:90px;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px;font-size:.8rem;font-family:ui-monospace,Menlo,monospace}
+.urow{display:flex;gap:8px;align-items:stretch}.urow .mode{flex:1;min-width:0}.urow .back{min-height:68px}
+td.best{font-weight:700;color:var(--accent)}.mode[disabled]{opacity:.5}
 .empty{color:var(--muted);text-align:center;padding:24px 8px}
 @media (min-width:768px){.q{font-size:1.3rem}.wrap{padding-block:28px 40px}h1{font-size:2rem}}
 @media (prefers-reduced-motion:no-preference){.mode,.btn,.chip{transition:background .12s}}
@@ -108,6 +110,7 @@ textarea{width:100%;min-height:90px;border:1px solid var(--line);background:var(
 
 <div id="app" class="wrap"></div>
 <div id="layer"></div>
+<div id="asklayer"></div>
 
 <script>
 const DATA=/*DATA*/null;
@@ -129,10 +132,24 @@ const cmpId=(a,b)=>{const x=idParts(a),y=idParts(b);return x.n-y.n||x.s.localeCo
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 
-const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const mem={};
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return k in mem?mem[k]:null}},set(k,v){mem[k]=v;try{localStorage.setItem(k,v)}catch(e){}}};
 function load(k,d){try{const v=JSON.parse(store.get(k));return v==null?d:v}catch(e){return d}}
-let rec=load("akq.rec",{}),log=load("akq.log",[]);
-const save=()=>{store.set("akq.rec",JSON.stringify(rec));store.set("akq.log",JSON.stringify(log.slice(-4000)))};
+let users=load("akq2.users",null);
+if(!users){users=[{id:1,name:"ユーザー1"},{id:2,name:"ユーザー2"}];store.set("akq2.users",JSON.stringify(users));
+  const lr=store.get("akq.rec"),ll=store.get("akq.log");
+  if(lr!==null)store.set("akq2.u1.rec",lr);if(ll!==null)store.set("akq2.u1.log",ll)}
+const saveUsers=()=>store.set("akq2.users",JSON.stringify(users));
+const rk=(id,t)=>"akq2.u"+id+"."+t;
+let cur=null,rec={},log=[];
+function loadUser(id){cur=users.find(u=>u.id===id)||users[0];rec=load(rk(cur.id,"rec"),{});log=load(rk(cur.id,"log"),[]);store.set("akq2.last",String(cur.id))}
+const save=()=>{store.set(rk(cur.id,"rec"),JSON.stringify(rec));store.set(rk(cur.id,"log"),JSON.stringify(log.slice(-4000)))};
+const answered=id=>!!rec[id];
+function metrics(u){const R=load(rk(u.id,"rec"),{}),L=load(rk(u.id,"log"),[]);
+  const m={seen:0,c:0,w:0,tot:L.length,ok:L.reduce((a,x)=>a+x[1],0),cats:{}};
+  CATS.forEach(c=>m.cats[c]={s:0,c:0,a:0,k:0});
+  Q.forEach(q=>{const r=R[q.id];if(r){m.seen++;const b=m.cats[catOf(q)];b.s++;if(r.s==="c"){m.c++;b.c++}else if(r.s==="w")m.w++}});
+  L.forEach(x=>{const q=byId[x[0]];if(q){const b=m.cats[catOf(q)];b.a++;b.k+=x[1]}});return m}
 function record(id,ok){
   const r=rec[id]||(rec[id]={s:"",need:0,n:0,t:0});r.n++;r.t=Date.now();
   if(ok){if(r.s==="w"){r.need--;if(r.need<=0){r.s="c";r.need=0}}else r.s="c"}
@@ -148,14 +165,14 @@ function parseAns(t){const m={},order=[];String(t||"").split("\n").forEach(l=>{
 function fmtQ(q,rev){const ja=parseAns(q.ja).m;
   return esc(q.q).replace(/\[\s*([A-Z])\s*\]/g,(_,k)=>rev&&ja[k]?`<span class="blank filled">${esc(ja[k])}</span>`:`<span class="blank">${k}</span>`)}
 
-let view="home",S=null,F={year:"",count:20,custom:"",from:0,to:SECS.length-1,num:"all"},stack=[],resetArm=false,toastT=0;
-const $app=document.getElementById("app"),$layer=document.getElementById("layer");
+let view="users",ask=null,S=null,F={edit:0,uname:"",year:"",count:20,custom:"",from:0,to:SECS.length-1,num:"all"},stack=[],resetArm=false,toastT=0;
+const $app=document.getElementById("app"),$layer=document.getElementById("layer"),$ask=document.getElementById("asklayer");
 
 function stats(){const seen=Object.keys(rec).length;let c=0,w=0;for(const k in rec){if(rec[k].s==="c")c++;else if(rec[k].s==="w")w++}
   const tot=log.length,ok=log.reduce((a,x)=>a+x[1],0);return{seen,c,w,tot,ok}}
 
 function home(){const st=stats(),rate=st.tot?Math.round(st.ok/st.tot*100)+"%":"–",wn=st.w;
-  return `<div><h1>解剖過去問クイズ</h1><p class="sub">${Q.length}問 · 解答済み ${st.seen}問</p></div>
+  return `<div class="top"><div class="grow"><h1>解剖過去問クイズ</h1><p class="sub">${Q.length}問 · 解答済み ${st.seen}問</p></div><button class="back" data-act="go" data-v="users">${esc(cur.name)} ⇄</button></div>
   <div class="stats3"><div class="stat"><b>${st.tot}</b><span>解答回数</span></div><div class="stat"><b>${rate}</b><span>正答率</span></div><div class="stat"><b>${wn}</b><span>復習中</span></div></div>
   <div class="modes">
   <button class="mode" data-act="random"><span class="t"><b>ランダム(全問)</b><span>全問題をシャッフルして出題</span></span><span class="chev">›</span></button>
@@ -165,10 +182,25 @@ function home(){const st=stats(),rate=st.tot?Math.round(st.ok/st.tot*100)+"%":"�
   ${mode("cat","部位別","くびと体幹の浅層・上肢・体壁・下肢・骨盤・その他")}
   <button class="mode" data-act="wrong"><span class="t"><b>不正解のみ</b><span>2回正解すると克服扱いになります</span></span>${wn?`<span class="badge">${wn}</span>`:""}<span class="chev">›</span></button>
   </div>
-  <button class="link" data-act="go" data-v="stats">成績・バックアップ</button>`}
+  <div class="chips" style="justify-content:center"><button class="link" data-act="go" data-v="stats">成績・バックアップ</button><button class="link" data-act="go" data-v="compare">ユーザー比較</button></div>`}
 function mode(v,t,d){return `<button class="mode" data-act="go" data-v="${v}"><span class="t"><b>${t}</b><span>${d}</span></span><span class="chev">›</span></button>`}
 function head(t){return `<div class="top"><button class="back" data-act="go" data-v="home">‹ 戻る</button><h2 class="grow">${t}</h2></div>`}
 
+function vUsers(){const last=+store.get("akq2.last");
+  const rows=users.map(u=>{const m=metrics(u),rate=m.tot?Math.round(m.ok/m.tot*100)+"%":"–";
+    if(F.edit===u.id)return `<div class="panel"><label class="f">名前<input id="uname" type="text" maxlength="12" value="${esc(F.uname)}" data-bind="uname"></label><div class="row2"><button class="btn" data-act="uedit" data-id="0">キャンセル</button><button class="btn pri" data-act="usave">保存</button></div></div>`;
+    return `<div class="urow"><button class="mode" data-act="pick" data-id="${u.id}"><span class="t"><b>${esc(u.name)}${u.id===last?' <span class="tag">前回</span>':""}</b><span>解答済み ${m.seen}問 · 正答率 ${rate} · 復習中 ${m.w}</span></span><span class="chev">›</span></button><button class="back" data-act="uedit" data-id="${u.id}" aria-label="名前を変更">名前</button></div>`}).join("");
+  return `<div><h1>解剖過去問クイズ</h1><p class="sub">ユーザーを選んでください。記録はユーザーごとに保存されます。</p></div><div class="modes">${rows}</div>
+  ${users.length<6?`<button class="btn" data-act="adduser">ユーザーを追加</button>`:""}${users.length>1?`<button class="link" data-act="cmp0">ユーザー比較</button>`:""}`}
+function vCompare(){const ms=users.map(metrics),pct=(a,b)=>b?Math.round(a/b*100):null;
+  const best=vals=>{const n=vals.filter(v=>v!=null);if(n.length<2)return vals.map(()=>"");const mx=Math.max(...n);return vals.map(v=>v!=null&&v===mx&&n.some(x=>x!==mx)?"best":"")};
+  const row=(label,vals,fmt)=>{const b=best(vals);return `<tr><td>${label}</td>${vals.map((v,i)=>`<td class="${b[i]}">${v==null?"–":fmt?fmt(v):v}</td>`).join("")}</tr>`};
+  const pf=v=>v+"%",th=`<tr><th></th>${users.map(u=>`<th>${esc(u.name)}</th>`).join("")}</tr>`;
+  return `<div class="top"><button class="back" data-act="go" data-v="${cur?"home":"users"}">‹ 戻る</button><h2 class="grow">ユーザー比較</h2></div>
+  <div class="panel tw"><table>${th}${row("解答済み(問)",ms.map(m=>m.seen))}${row("正解扱い(問)",ms.map(m=>m.c))}${row("復習中(問)",ms.map(m=>m.w),null).replace(/ class="best"/g,"")}${row("解答回数",ms.map(m=>m.tot))}${row("正答率",ms.map(m=>pct(m.ok,m.tot)),pf)}</table></div>
+  <div class="panel tw"><h2>部位別の正答率</h2><table>${th}${CATS.map(c=>row(c,ms.map(m=>pct(m.cats[c].k,m.cats[c].a)),pf)).join("")}</table></div>
+  <div class="panel tw"><h2>部位別の解答済み(問)</h2><table>${th}${CATS.map(c=>row(c,ms.map(m=>m.cats[c].s))).join("")}</table></div>
+  <p class="sub">濃く表示された数値が、その行で最も高い値です。正答率は累計の解答回数で計算しています。</p>`}
 function vYear(){const ys={};Q.forEach(q=>{const k=yearKey(q);ys[k]=(ys[k]||0)+1});
   const keys=Object.keys(ys),tot=keys.filter(k=>!k.endsWith("再")).sort(),sai=keys.filter(k=>k.endsWith("再")).sort();
   const chips=a=>a.map(k=>`<button class="chip ${F.year===k?"on":""}" data-act="year" data-k="${k}">${2000+parseInt(k,10)}</button>`).join("");
@@ -192,12 +224,12 @@ function vCat(){const cnt={};CATS.forEach(c=>cnt[c]=0);Q.forEach(q=>cnt[catOf(q)
 function vStats(){const by={};CATS.forEach(c=>by[c]={t:0,s:0,c:0,w:0});
   Q.forEach(q=>{const b=by[catOf(q)];b.t++;const r=rec[q.id];if(r){b.s++;if(r.s==="c")b.c++;else if(r.s==="w")b.w++}});
   const st=stats();
-  return head("成績")+`<div class="stats3"><div class="stat"><b>${st.seen}<small style="font-size:.9rem">/${Q.length}</small></b><span>解答済み</span></div><div class="stat"><b>${st.c}</b><span>正解扱い</span></div><div class="stat"><b>${st.w}</b><span>復習中</span></div></div>
+  return head("成績 · "+esc(cur.name))+`<div class="stats3"><div class="stat"><b>${st.seen}<small style="font-size:.9rem">/${Q.length}</small></b><span>解答済み</span></div><div class="stat"><b>${st.c}</b><span>正解扱い</span></div><div class="stat"><b>${st.w}</b><span>復習中</span></div></div>
   <div class="panel tw"><table><tr><th>部位</th><th>問題</th><th>解答済</th><th>正解扱</th><th>復習中</th></tr>${CATS.map(c=>{const b=by[c];return `<tr><td>${c}</td><td>${b.t}</td><td>${b.s}</td><td>${b.c}</td><td>${b.w}</td></tr>`}).join("")}</table></div>
-  <div class="panel"><h2>バックアップ</h2><p class="sub">記録はこの端末のブラウザに保存されます。別の端末へ移すときは、下の文字列をコピーして、移行先の欄に貼り付けて「読み込む」を押してください。</p>
+  <div class="panel"><h2>バックアップ</h2><p class="sub">記録はこの端末のブラウザに、ユーザーごとに保存されます。ここに表示されるのは現在のユーザーの記録です。別の端末へ移すときは、下の文字列をコピーして、移行先の欄に貼り付けて「読み込む」を押してください。</p>
   <textarea id="bk" readonly>${esc(JSON.stringify({rec,log}))}</textarea><button class="btn" data-act="copy">コピー</button>
   <textarea id="imp" placeholder="ここに貼り付け"></textarea><button class="btn" data-act="import">読み込む</button></div>
-  <button class="btn ${resetArm?"ng":""}" data-act="reset">${resetArm?"本当に全記録を消去する(もう一度押す)":"記録をすべて消去"}</button>`}
+  <button class="btn ${resetArm?"ng":""}" data-act="reset">${resetArm?"本当に「"+esc(cur.name)+"」の記録を消去する(もう一度押す)":"このユーザーの記録を消去"}</button>`}
 
 function cardHTML(st){const q=byId[st.id],r=rec[q.id],a=parseAns(q.ja),l=parseAns(q.la);
   const sec=secOf(q);
@@ -224,7 +256,7 @@ function vResult(){const n=S.res.length,ok=S.res.filter(x=>x.ok).length,miss=S.r
   ${miss.length?`<div class="missed"><h2>不正解 ${miss.length}問</h2>${miss.map(x=>`<button data-act="open" data-id="${esc(x.id)}"><span class="tag">${esc(x.id)}</span><span class="qt">${esc(byId[x.id].q.replace(/\s+/g," "))}</span></button>`).join("")}</div>`:`<p class="empty">全問正解です。</p>`}
   <div class="modes">${miss.length?`<button class="btn pri" data-act="redo-miss">不正解だけもう一度</button>`:""}<button class="btn" data-act="redo">同じ条件で最初から</button><button class="btn" data-act="go" data-v="home">ホームへ</button></div>`}
 
-function render(){const v={home,year:vYear,count:vCount,section:vSection,cat:vCat,stats:vStats,quiz:vQuiz,result:vResult}[view];
+function render(){const v={users:vUsers,compare:vCompare,home,year:vYear,count:vCount,section:vSection,cat:vCat,stats:vStats,quiz:vQuiz,result:vResult}[view];
   const y=window.scrollY;$app.innerHTML=v();if(view==="home"||view==="quiz"||view==="result")window.scrollTo(0,0);else window.scrollTo(0,y)}
 function sheetRender(){if(!stack.length){$layer.innerHTML="";return}const st=stack[stack.length-1];
   $layer.innerHTML=`<div class="sheet" data-act="sheet-bg"><div class="in" role="dialog" aria-label="類題"><div class="hd"><button class="back" data-act="sheet-back">${stack.length>1?"‹ 戻る":"閉じる"}</button>${stack.length>1?`<button class="back" data-act="sheet-close">閉じる</button>`:""}</div>
@@ -234,6 +266,13 @@ function sheetRender(){if(!stack.length){$layer.innerHTML="";return}const st=sta
 function toast(ok,t){clearTimeout(toastT);let e=document.getElementById("toast");if(!e){e=document.createElement("div");e.id="toast";document.body.appendChild(e)}
   e.className="toast "+(ok?"ok":"ng");e.textContent=t;e.hidden=false;toastT=setTimeout(()=>{e.hidden=true},900)}
 
+function launch(label,pool,make){const all=pool(false).length,nw=pool(true).length;
+  if(!all){toast(false,"該当する問題がありません");return}ask={label,pool,make,all,nw};askRender()}
+function askRender(){if(!ask){$ask.innerHTML="";return}
+  $ask.innerHTML=`<div class="sheet" data-act="ask-bg"><div class="in" role="dialog" aria-label="開始方法"><h2>${esc(ask.label)}</h2>
+  <button class="mode" data-act="ask-go" data-skip="1" ${ask.nw?"":"disabled"}><span class="t"><b>続きから</b><span>${ask.nw?`未回答の問題だけ出題(${ask.nw}問)`:"すべて解答済みです"}</span></span><span class="chev">›</span></button>
+  <button class="mode" data-act="ask-go" data-skip="0"><span class="t"><b>最初から</b><span>解答済みも含めて出題(${ask.all}問) · 記録は消えません</span></span><span class="chev">›</span></button>
+  <button class="btn" data-act="ask-cancel">キャンセル</button></div></div>`}
 function begin(label,rebuild){const ids=rebuild();S={label,queue:ids.slice(),i:0,res:[],card:null,rebuild};
   if(!S.queue.length){view="home";render();return}S.card={id:S.queue[0],rev:false};view="quiz";render()}
 function advance(){S.i++;if(S.i>=S.queue.length){view="result"}else S.card={id:S.queue[S.i],rev:false};render()}
@@ -245,14 +284,22 @@ document.addEventListener("click",e=>{const t=e.target.closest("[data-act]");if(
   if(a==="sheet-bg"){if(e.target===t){stack=[];sheetRender()}return}
   switch(a){
   case"go":view=d.v;resetArm=false;render();break;
-  case"random":begin("ランダム",()=>shuffle(allIds()));break;
+  case"random":launch("ランダム(全問)",sk=>allIds().filter(i=>!sk||!answered(i)),shuffle);break;
+  case"ask-bg":if(e.target===t){ask=null;askRender()}break;
+  case"ask-cancel":ask=null;askRender();break;
+  case"ask-go":{const k=ask,sk=d.skip==="1";ask=null;askRender();if(!k)break;begin(k.label+(sk?"(続き)":""),()=>k.make(k.pool(sk)));break}
+  case"pick":loadUser(+d.id);S=null;stack=[];view="home";render();break;
+  case"uedit":F.edit=+d.id;{const u=users.find(x=>x.id===F.edit);F.uname=u?u.name:""}render();break;
+  case"usave":{const u=users.find(x=>x.id===F.edit),n=F.uname.trim();if(u&&n){u.name=n;saveUsers();if(cur&&cur.id===u.id)cur=u}F.edit=0;render();break}
+  case"adduser":{const id=Math.max(...users.map(u=>u.id))+1;users.push({id,name:"ユーザー"+id});saveUsers();render();break}
+  case"cmp0":view="compare";cur=null;render();break;
   case"year":F.year=d.k;render();break;
-  case"start-year":{const y=F.year;begin(yearLabel(y),()=>Q.filter(q=>yearKey(q)===y).map(q=>q.id).sort(cmpId));break}
+  case"start-year":{const y=F.year;launch(yearLabel(y),sk=>Q.filter(q=>yearKey(q)===y&&(!sk||!answered(q.id))).map(q=>q.id),ids=>ids.slice().sort(cmpId));break}
   case"count":F.count=+d.n;F.custom="";render();break;
-  case"start-count":{const n=F.custom?Math.max(1,parseInt(F.custom,10)||1):F.count;begin(Math.min(n,Q.length)+"問ランダム",()=>take(allIds(),n));break}
-  case"start-section":{const a1=Math.min(F.from,F.to),b1=Math.max(F.from,F.to),pool=secPool(),n=F.num==="all"?pool.length:+F.num;
-    begin("§"+SECS[a1].id+"–§"+SECS[b1].id,()=>take(pool,n));break}
-  case"cat":{const c=d.c;begin(c,()=>shuffle(Q.filter(q=>catOf(q)===c).map(q=>q.id)));break}
+  case"start-count":{const n=F.custom?Math.max(1,parseInt(F.custom,10)||1):F.count;launch(Math.min(n,Q.length)+"問ランダム",sk=>allIds().filter(i=>!sk||!answered(i)),ids=>take(ids,n));break}
+  case"start-section":{const a1=Math.min(F.from,F.to),b1=Math.max(F.from,F.to),num=F.num;
+    launch("§"+SECS[a1].id+"–§"+SECS[b1].id,sk=>secPool().filter(i=>!sk||!answered(i)),ids=>take(ids,num==="all"?ids.length:+num));break}
+  case"cat":{const c=d.c;launch(c,sk=>Q.filter(q=>catOf(q)===c&&(!sk||!answered(q.id))).map(q=>q.id),shuffle);break}
   case"wrong":{const ids=wrongIds();if(!ids.length){toast(true,"不正解の問題はありません");break}begin("不正解のみ",()=>shuffle(wrongIds()));break}
   case"reveal":S.card.rev=true;render();window.scrollTo(0,0);break;
   case"ok":grade(true);break;case"ng":grade(false);break;
@@ -271,10 +318,10 @@ document.addEventListener("click",e=>{const t=e.target.closest("[data-act]");if(
   case"import":{try{const o=JSON.parse(document.getElementById("imp").value.trim());if(!o||typeof o.rec!=="object")throw 0;rec=o.rec;log=Array.isArray(o.log)?o.log:[];save();toast(true,"読み込みました");render()}catch(_){toast(false,"形式が正しくありません")}break}
   case"reset":if(!resetArm){resetArm=true;render()}else{rec={};log=[];save();resetArm=false;toast(true,"消去しました");render()}break;
   }});
-document.addEventListener("input",e=>{const t=e.target;if(t.dataset.bind==="custom"){F.custom=t.value;const b=document.querySelector('[data-act="start-count"]');
+document.addEventListener("input",e=>{const t=e.target;if(t.dataset.bind==="uname"){F.uname=t.value;return}if(t.dataset.bind==="custom"){F.custom=t.value;const b=document.querySelector('[data-act="start-count"]');
   if(b){const n=F.custom?Math.max(1,parseInt(F.custom,10)||1):F.count;b.textContent=Math.min(n,Q.length)+"問をランダムに解く"}
   document.querySelectorAll('[data-act="count"]').forEach(c=>c.classList.toggle("on",!F.custom&&+c.dataset.n===F.count))}});
-document.addEventListener("change",e=>{const t=e.target,b=t.dataset.bind;if(!b||b==="custom")return;F[b]=b==="num"?t.value:+t.value;render()});
+document.addEventListener("change",e=>{const t=e.target,b=t.dataset.bind;if(!b||b==="custom"||b==="uname")return;F[b]=b==="num"?t.value:+t.value;render()});
 document.addEventListener("keydown",e=>{if(view!=="quiz"||e.target.matches("input,textarea,select"))return;
   if(!S.card.rev&&(e.key==="Enter"||e.key===" ")){e.preventDefault();S.card.rev=true;render()}
   else if(S.card.rev&&(e.key==="1"||e.key==="o")){grade(true)}else if(S.card.rev&&(e.key==="2"||e.key==="x")){grade(false)}});
