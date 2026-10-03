@@ -154,7 +154,7 @@ function metrics(u){const R=load(rk(u.id,"rec"),{}),L=load(rk(u.id,"log"),[]);
   Q.forEach(q=>{const r=R[q.id];if(r){m.seen++;const b=m.cats[catOf(q)];b.s++;if(r.s==="c"){m.c++;b.c++}else if(r.s==="w")m.w++}});
   L.forEach(x=>{const q=byId[x[0]];if(q){const b=m.cats[catOf(q)];b.a++;b.k+=x[1]}});return m}
 
-const CLOUD=/*CLOUDCFG*/{"projectId":"","apiKey":""}/*END*/;
+const CLOUD=/*CLOUDCFG*/{"projectId": "anatomy-quiz-d00f3c", "apiKey": "AIzaSyAxZyRb4cQ3TlflZEMpRyZcxcWC0eEURCo"}/*END*/;
 const cloudOn=()=>!!(CLOUD.projectId&&CLOUD.apiKey);
 const fsBase=()=>CLOUD.base||"https://firestore.googleapis.com/v1/projects/"+CLOUD.projectId+"/databases/(default)/documents";
 const keyQ=()=>"key="+encodeURIComponent(CLOUD.apiKey);
