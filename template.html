@@ -117,8 +117,8 @@ td.best{font-weight:700;color:var(--accent)}.mode[disabled]{opacity:.5}
 const DATA=/*DATA*/null;
 (function(){
 "use strict";
-const Q=DATA.q,SECS=DATA.secs,byId={},secIdx={};
-Q.forEach(q=>{byId[q.id]=q});SECS.forEach((s,i)=>{secIdx[s.id]=i});
+const QALL=DATA.q,SECS=DATA.secs,byId={},secIdx={};
+QALL.forEach(q=>{byId[q.id]=q});SECS.forEach((s,i)=>{secIdx[s.id]=i});
 const CATS=["くびと体幹の浅層","上肢","体壁","下肢","骨盤","その他"];
 const CATDESC={"くびと体幹の浅層":"§1–10","上肢":"§11–25","体壁":"§26–34","下肢":"§53–63","骨盤":"§64–71","その他":"胸腔・腹腔・あたま・脳など"};
 const secOf=q=>q.sec?q.sec.split("-")[0]:"";
@@ -131,6 +131,15 @@ const yearKey=q=>{const p=idParts(q.id);return p.y+(p.sai?"再":"")};
 const yearLabel=k=>(2000+parseInt(k,10))+"年度"+(k.endsWith("再")?" 再試":"");
 const cmpId=(a,b)=>{const x=idParts(a),y=idParts(b);return x.n-y.n||x.s.localeCompare(y.s)};
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const nrm=s=>String(s||"").replace(/\s+/g,"").toLowerCase();
+const ordKey=id=>{const p=idParts(id);return[parseInt(p.y,10)||0,p.sai?1:0,p.n,p.s]};
+const cmpFull=(a,b)=>{const x=ordKey(a),y=ordKey(b);for(let i=0;i<3;i++)if(x[i]!==y[i])return x[i]-y[i];return x[3].localeCompare(y[3])};
+const canon={},members={};
+{const g={};QALL.forEach(q=>{const k=nrm(q.q)+"\u0001"+nrm(q.ja);(g[k]||(g[k]=[])).push(q.id)});
+ for(const k in g){const ids=g[k].slice().sort(cmpFull);ids.forEach(i=>{canon[i]=ids[0]});members[ids[0]]=ids}}
+const Q=QALL.filter(q=>canon[q.id]===q.id);
+function normRec(R){const out={};for(const id in R){const c=canon[id]||id,r=R[id];
+  if(!out[c])out[c]=Object.assign({},r);else{const o=out[c],n=(o.n||0)+(r.n||0);if((r.t||0)>(o.t||0))Object.assign(o,r);o.n=n}}return out}
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 
 const CLOUD=/*CLOUDCFG*/{"projectId":"","apiKey":""}/*END*/;
@@ -146,7 +155,7 @@ const fv=(d,k)=>d&&d.fields&&d.fields[k]&&d.fields[k].stringValue!=null?d.fields
 const LOGMAX=4000;
 let users=[],usersState="load",usersErr="",cur=null,rec={},log=[];
 let dirty=false,flushing=false,flushT=0,syncState="ok";
-const answered=id=>!!rec[id];
+const answered=id=>!!rec[canon[id]||id];
 function metricsOf(R,L){const m={seen:0,c:0,w:0,tot:L.length,ok:L.reduce((a,x)=>a+x[1],0),cats:{}};
   CATS.forEach(c=>m.cats[c]={s:0,c:0,a:0,k:0});
   Q.forEach(q=>{const r=R[q.id];if(r){m.seen++;const b=m.cats[catOf(q)];b.s++;if(r.s==="c"){m.c++;b.c++}else if(r.s==="w")m.w++}});
@@ -163,7 +172,7 @@ async function flush(){clearTimeout(flushT);if(!cur||!dirty)return true;if(flush
   flushing=true;const u=cur;dirty=false;setSync("saving");let ok=true;
   try{const doc=await fsGet("records/"+u.pid);
     if(cur!==u)throw new Error("user changed");
-    if(doc){try{const m=mergeData(rec,log,JSON.parse(fv(doc,"data")));rec=m.rec;log=m.log}catch(e){}}
+    if(doc){try{const m=mergeData(rec,log,JSON.parse(fv(doc,"data")));rec=normRec(m.rec);log=m.log}catch(e){}}
     const now=new Date().toISOString(),st=metricsOf(rec,log);
     await fsSet("records/"+u.pid,{data:JSON.stringify({rec,log}),updated:now});
     await fsSet("profiles/"+u.pid,{name:u.name,stats:JSON.stringify(st),updated:now,hidden:"0"});
@@ -185,8 +194,9 @@ async function pickUser(pid){
   if(cur&&dirty){const ok=await flush();if(!ok){toast(false,"未保存の記録があります。接続を確認してください");return}}
   view="loading";render();
   try{const doc=await fsGet("records/"+pid);let R={},L=[];
-    if(doc){try{const o=JSON.parse(fv(doc,"data"));R=o.rec||{};L=o.log||[]}catch(e){}}
-    cur=users.find(u=>u.pid===pid)||cur;rec=R;log=L;dirty=false;setSync("ok");S=null;stack=[];view="home";render()}
+    let changed=false;
+    if(doc){try{const o=JSON.parse(fv(doc,"data"));R=o.rec||{};L=o.log||[];const n0=Object.keys(R).length;R=normRec(R);changed=Object.keys(R).length!==n0}catch(e){}}
+    cur=users.find(u=>u.pid===pid)||cur;rec=R;log=L;dirty=false;setSync("ok");S=null;stack=[];view="home";render();if(changed)save()}
   catch(e){view="users";toast(false,"読み込めませんでした");render()}}
 async function createUser(name){const pid=rid(20),now=new Date().toISOString(),st=metricsOf({},[]);
   try{await fsSet("records/"+pid,{data:'{"rec":{},"log":[]}',updated:now});
@@ -199,7 +209,7 @@ function legacyUsers(){const out=[];try{const g=k=>localStorage.getItem(k),us=JS
     const one=(name,rk,lk)=>{let R={},L=[];try{R=JSON.parse(g(rk)||"{}");L=JSON.parse(g(lk)||"[]")}catch(e){}if(Object.keys(R).length)out.push({name,rec:R,log:L})};
     if(us)us.forEach(u=>one(u.name,"akq2.u"+u.id+".rec","akq2.u"+u.id+".log"));else one("以前の記録","akq.rec","akq.log")}catch(e){}return out}
 function record(id,ok){
-  const r=rec[id]||(rec[id]={s:"",need:0,n:0,t:0});r.n++;r.t=Date.now();
+  id=canon[id]||id;const r=rec[id]||(rec[id]={s:"",need:0,n:0,t:0});r.n++;r.t=Date.now();
   if(ok){if(r.s==="w"){r.need--;if(r.need<=0){r.s="c";r.need=0}}else r.s="c"}
   else if(r.s!=="w"){r.s="w";r.need=2}
   log.push([id,ok?1:0,r.t]);if(log.length>LOGMAX)log=log.slice(-LOGMAX);save();
@@ -285,16 +295,17 @@ function legacyPanel(){const L=legacyUsers();if(!L.length)return"";
   return `<div class="panel"><h2>この端末に残っている以前の記録</h2><p class="sub">以前このブラウザに保存されていた記録です。現在のユーザー「${esc(cur.name)}」の記録に統合してクラウドへ保存します。統合しても、この端末の記録は削除されません。</p>${L.map((l,i)=>`<button class="btn" data-act="legacy" data-i="${i}">${esc(l.name)}(${Object.keys(l.rec).length}問)を統合</button>`).join("")}</div>`}
 
 
-function cardHTML(st){const q=byId[st.id],r=rec[q.id],a=parseAns(q.ja),l=parseAns(q.la);
+function cardHTML(st){const q=byId[canon[st.id]||st.id],r=rec[q.id],a=parseAns(q.ja),l=parseAns(q.la);
   const sec=secOf(q);
-  let h=`<div class="card"><div class="meta"><span class="tag">${esc(q.id)}</span>${q.page?`<span class="tag">p.${esc(q.page)}</span>`:""}${q.sec&&q.sec!=="不明"?`<span class="tag" title="${esc(secTitle(sec))}">§${esc(q.sec)} ${esc(secTitle(sec))}</span>`:""}${r&&r.s==="w"?`<span class="tag rev">復習中 あと${r.need}回</span>`:""}</div>
+  let h=`<div class="card"><div class="meta"><span class="tag">${esc(q.id)}</span>${q.page?`<span class="tag">p.${esc(q.page)}</span>`:""}${q.sec&&q.sec!=="不明"?`<span class="tag" title="${esc(secTitle(sec))}">§${esc(q.sec)} ${esc(secTitle(sec))}</span>`:""}${(members[q.id]||[]).length>1?`<span class="tag">出題 ${[...new Set(members[q.id].map(i=>{const p=idParts(i);return(2000+parseInt(p.y,10))+(p.sai?"再":"")}))].join("・")}</span>`:""}${r&&r.s==="w"?`<span class="tag rev">復習中 あと${r.need}回</span>`:""}</div>
   <p class="q">${fmtQ(q,st.rev)}</p>`;
   if(st.rev){h+=`<div class="ans">`;
     if(a.order.length)h+=a.order.map(k=>`<div class="arow"><span class="l">${k}</span><span><span class="ja">${esc(a.m[k])}</span>${l.m[k]?`<span class="la">${esc(l.m[k])}</span>`:""}</span></div>`).join("");
     else h+=`<div class="ja" style="white-space:pre-wrap">${esc(a.raw)}</div>`;
     h+=`</div>`}
   h+=`</div>`;
-  if(q.sib.length)h+=`<div class="sibs"><h3>類題</h3><div class="chips">${q.sib.map(s=>`<button class="chip" data-act="sib" data-id="${esc(s)}">${esc(s)}</button>`).join("")}</div></div>`;
+  const own=new Set(members[q.id]||[q.id]),sibs=[...new Set((members[q.id]||[q.id]).flatMap(i=>byId[i].sib).map(x=>canon[x]||x))].filter(x=>!own.has(x)).sort(cmpFull);
+  if(sibs.length)h+=`<div class="sibs"><h3>類題</h3><div class="chips">${sibs.map(s=>`<button class="chip" data-act="sib" data-id="${esc(s)}">${esc(s)}</button>`).join("")}</div></div>`;
   return h}
 
 function vQuiz(){const st=S.card,n=S.queue.length;
@@ -347,7 +358,7 @@ document.addEventListener("click",e=>{const t=e.target.closest("[data-act]");if(
   case"uedit":F.edit=d.id==="0"?"":d.id;{const u=users.find(x=>x.pid===F.edit);F.uname=u?u.name:""}render();break;
   case"usave":{const u=users.find(x=>x.pid===F.edit),n=F.uname.trim();F.edit="";render();if(u&&n&&n!==u.name)renameUser(u,n).then(render);break}
   case"adduser":{const n=(F.newname||"").trim();if(!n){toast(false,"名前を入力してください");break}createUser(n);break}
-  case"legacy":{const l=legacyUsers()[+d.i];if(!l)break;const m=mergeData(rec,log,l);rec=m.rec;log=m.log;save();toast(true,"統合しました");render();break}
+  case"legacy":{const l=legacyUsers()[+d.i];if(!l)break;const m=mergeData(rec,log,l);rec=normRec(m.rec);log=m.log;save();toast(true,"統合しました");render();break}
   case"year":F.year=d.k;render();break;
   case"start-year":{const y=F.year;launch(yearLabel(y),sk=>Q.filter(q=>yearKey(q)===y&&(!sk||!answered(q.id))).map(q=>q.id),ids=>ids.slice().sort(cmpId));break}
   case"count":F.count=+d.n;F.custom="";render();break;
