@@ -3,8 +3,13 @@ from pathlib import Path
 d=Path(__file__).parent
 t=(d/'template.html').read_text(encoding='utf-8')
 data=(d/'data.json').read_text(encoding='utf-8')
+import re,os
 page=t.replace('/*DATA*/null',data)
 (d/'artifact.html').write_text(page,encoding='utf-8')
+cfgp=d/'cloud.json'
+if cfgp.exists():
+    cfg=json.dumps(json.loads(cfgp.read_text(encoding='utf-8')),ensure_ascii=False)
+    page=re.sub(r'/\*CLOUDCFG\*/.*?/\*END\*/',lambda m:'/*CLOUDCFG*/'+cfg+'/*END*/',page,flags=re.S)
 icon=''
 try:
     from PIL import Image,ImageDraw,ImageFont
