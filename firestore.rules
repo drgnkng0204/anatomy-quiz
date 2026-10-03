@@ -14,11 +14,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 解答履歴のバックアップ(コードを知っている人だけが読み書きできる。一覧は不可)
-    match /backups/{code} {
+    // 各ユーザーの解答履歴(ユーザーIDを知っている場合のみ取得可。一覧は不可)
+    match /records/{id} {
       allow get: if true;
       allow list: if false;
-      allow create, update: if code.size() >= 24 && code.size() <= 64
+      allow create, update: if id.size() >= 16 && id.size() <= 40
         && request.resource.data.keys().hasOnly(['data', 'updated'])
         && request.resource.data.data is string && request.resource.data.data.size() < 900000
         && request.resource.data.updated is string;

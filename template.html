@@ -101,6 +101,7 @@ th:first-child,td:first-child{text-align:left}
 th{font-weight:500;color:var(--muted);font-size:.78rem}
 .tw{overflow-x:auto}
 textarea{width:100%;min-height:90px;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px;font-size:.8rem;font-family:ui-monospace,Menlo,monospace}
+.tag.saving{background:var(--line);color:var(--muted)}.tag.err{background:var(--ng-soft);color:var(--ng)}
 .urow{display:flex;gap:8px;align-items:stretch}.urow .mode{flex:1;min-width:0}.urow .back{min-height:68px}
 td.best{font-weight:700;color:var(--accent)}.mode[disabled]{opacity:.5}
 .empty{color:var(--muted);text-align:center;padding:24px 8px}
@@ -132,25 +133,6 @@ const cmpId=(a,b)=>{const x=idParts(a),y=idParts(b);return x.n-y.n||x.s.localeCo
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 
-const mem={};
-const store={get(k){try{return localStorage.getItem(k)}catch(e){return k in mem?mem[k]:null}},set(k,v){mem[k]=v;try{localStorage.setItem(k,v)}catch(e){}}};
-function load(k,d){try{const v=JSON.parse(store.get(k));return v==null?d:v}catch(e){return d}}
-let users=load("akq2.users",null);
-if(!users){users=[{id:1,name:"ユーザー1"},{id:2,name:"ユーザー2"}];store.set("akq2.users",JSON.stringify(users));
-  const lr=store.get("akq.rec"),ll=store.get("akq.log");
-  if(lr!==null)store.set("akq2.u1.rec",lr);if(ll!==null)store.set("akq2.u1.log",ll)}
-const saveUsers=()=>store.set("akq2.users",JSON.stringify(users));
-const rk=(id,t)=>"akq2.u"+id+"."+t;
-let cur=null,rec={},log=[];
-function loadUser(id){cur=users.find(u=>u.id===id)||users[0];rec=load(rk(cur.id,"rec"),{});log=load(rk(cur.id,"log"),[]);store.set("akq2.last",String(cur.id))}
-const save=()=>{store.set(rk(cur.id,"rec"),JSON.stringify(rec));store.set(rk(cur.id,"log"),JSON.stringify(log.slice(-4000)))};
-const answered=id=>!!rec[id];
-function metrics(u){const R=load(rk(u.id,"rec"),{}),L=load(rk(u.id,"log"),[]);
-  const m={seen:0,c:0,w:0,tot:L.length,ok:L.reduce((a,x)=>a+x[1],0),cats:{}};
-  CATS.forEach(c=>m.cats[c]={s:0,c:0,a:0,k:0});
-  Q.forEach(q=>{const r=R[q.id];if(r){m.seen++;const b=m.cats[catOf(q)];b.s++;if(r.s==="c"){m.c++;b.c++}else if(r.s==="w")m.w++}});
-  L.forEach(x=>{const q=byId[x[0]];if(q){const b=m.cats[catOf(q)];b.a++;b.k+=x[1]}});return m}
-
 const CLOUD=/*CLOUDCFG*/{"projectId":"","apiKey":""}/*END*/;
 const cloudOn=()=>!!(CLOUD.projectId&&CLOUD.apiKey);
 const fsBase=()=>CLOUD.base||"https://firestore.googleapis.com/v1/projects/"+CLOUD.projectId+"/databases/(default)/documents";
@@ -161,47 +143,66 @@ async function fsList(p){const r=await fetch(fsBase()+"/"+p+"?pageSize=300&"+key
 async function fsSet(p,o){const fields={};for(const k in o)fields[k]={stringValue:String(o[k])};
   const r=await fetch(fsBase()+"/"+p+"?"+keyQ(),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok)throw new Error("HTTP "+r.status)}
 const fv=(d,k)=>d&&d.fields&&d.fields[k]&&d.fields[k].stringValue!=null?d.fields[k].stringValue:"";
-function ensureIds(u){if(!u.pid)u.pid=rid(20);if(!u.code)u.code=rid(32)}
+const LOGMAX=4000;
+let users=[],usersState="load",usersErr="",cur=null,rec={},log=[];
+let dirty=false,flushing=false,flushT=0,syncState="ok";
+const answered=id=>!!rec[id];
+function metricsOf(R,L){const m={seen:0,c:0,w:0,tot:L.length,ok:L.reduce((a,x)=>a+x[1],0),cats:{}};
+  CATS.forEach(c=>m.cats[c]={s:0,c:0,a:0,k:0});
+  Q.forEach(q=>{const r=R[q.id];if(r){m.seen++;const b=m.cats[catOf(q)];b.s++;if(r.s==="c"){m.c++;b.c++}else if(r.s==="w")m.w++}});
+  L.forEach(x=>{const q=byId[x[0]];if(q){const b=m.cats[catOf(q)];b.a++;b.k+=x[1]}});return m}
 function mergeData(R,L,rd){const rec2=Object.assign({},R),rr=(rd&&rd.rec)||{};
   for(const id in rr){if(!rec2[id]||(rr[id].t||0)>(rec2[id].t||0))rec2[id]=rr[id]}
   const seen=new Set(),log2=[];[].concat(L,(rd&&rd.log)||[]).forEach(x=>{const k=x[0]+"|"+x[2];if(!seen.has(k)){seen.add(k);log2.push(x)}});
-  log2.sort((a,b)=>a[2]-b[2]);return{rec:rec2,log:log2}}
-function applyLocal(u,R,L){if(cur&&cur.id===u.id){rec=R;log=L;save()}
-  else{store.set(rk(u.id,"rec"),JSON.stringify(R));store.set(rk(u.id,"log"),JSON.stringify(L.slice(-4000)))}}
-function localData(u){return cur&&cur.id===u.id?{R:rec,L:log}:{R:load(rk(u.id,"rec"),{}),L:load(rk(u.id,"log"),[])}}
-async function syncUser(u){if(!cloudOn()||!u.cloud)return;ensureIds(u);
-  const doc=await fsGet("backups/"+u.code);
-  const d=localData(u);let R=d.R,L=d.L;
-  if(doc){try{const m=mergeData(R,L,JSON.parse(fv(doc,"data")));R=m.rec;L=m.log}catch(e){}}
-  applyLocal(u,R,L);
-  const now=new Date().toISOString();
-  await fsSet("backups/"+u.code,{data:JSON.stringify({rec:R,log:L.slice(-4000),pid:u.pid}),updated:now});
-  await fsSet("profiles/"+u.pid,{name:u.name,stats:JSON.stringify(metrics(u)),updated:now,hidden:"0"});
-  u.last=now;u.err="";saveUsers()}
-let syncing=false,again=false,syncT=0;
-async function runSync(u,manual){if(syncing){again=true;return}syncing=true;
-  try{await syncUser(u);if(manual)toast(true,"同期しました")}
-  catch(e){u.err=String(e.message||e);saveUsers();if(manual)toast(false,"同期に失敗しました")}
-  finally{syncing=false;if(view==="cloud")render();if(again){again=false;syncSoon()}}}
-function syncSoon(){clearTimeout(syncT);syncT=setTimeout(()=>{if(cur&&cur.cloud)runSync(cur)},4000)}
-async function unshare(u){u.cloud=false;saveUsers();if(!cloudOn()||!u.pid)return;
-  try{await fsSet("profiles/"+u.pid,{name:u.name,stats:JSON.stringify(metrics(u)),updated:new Date().toISOString(),hidden:"1"})}catch(e){}}
-async function restoreFrom(code){code=code.trim();if(code.length<16){toast(false,"コードが短すぎます");return}
-  try{const doc=await fsGet("backups/"+code);if(!doc){toast(false,"このコードの記録が見つかりません");return}
-    const rd=JSON.parse(fv(doc,"data")),d=localData(cur),m=mergeData(d.R,d.L,rd);
-    applyLocal(cur,m.rec,m.log);cur.code=code;if(rd.pid)cur.pid=rd.pid;cur.cloud=true;saveUsers();
-    await runSync(cur,true);render()}catch(e){toast(false,"復元に失敗しました")}}
-let RK={state:"idle",list:[],err:""};
-async function loadRanking(){if(!cloudOn())return;RK.state="load";if(view==="ranking")render();
-  try{const j=await fsList("profiles");RK.list=(j.documents||[]).map(d=>{let st=null;try{st=JSON.parse(fv(d,"stats"))}catch(e){}
-    return{pid:d.name.split("/").pop(),name:fv(d,"name"),hidden:fv(d,"hidden")==="1",updated:fv(d,"updated"),st}}).filter(x=>x.st&&!x.hidden);RK.state="ok";RK.err=""}
-  catch(e){RK.state="err";RK.err=String(e.message||e)}
-  if(view==="ranking")render()}
+  log2.sort((a,b)=>a[2]-b[2]);return{rec:rec2,log:log2.slice(-LOGMAX)}}
+const SYNCTXT={ok:"保存済み",saving:"保存中…",err:"未保存(再試行します)"};
+function setSync(st){syncState=st;document.querySelectorAll(".syncst").forEach(e=>{e.className="tag syncst "+st;e.textContent=SYNCTXT[st]})}
+const syncTag=()=>`<span class="tag syncst ${syncState}">${SYNCTXT[syncState]}</span>`;
+function save(){dirty=true;setSync("saving");clearTimeout(flushT);flushT=setTimeout(flush,1200)}
+async function flush(){clearTimeout(flushT);if(!cur||!dirty)return true;if(flushing)return false;
+  flushing=true;const u=cur;dirty=false;setSync("saving");let ok=true;
+  try{const doc=await fsGet("records/"+u.pid);
+    if(cur!==u)throw new Error("user changed");
+    if(doc){try{const m=mergeData(rec,log,JSON.parse(fv(doc,"data")));rec=m.rec;log=m.log}catch(e){}}
+    const now=new Date().toISOString(),st=metricsOf(rec,log);
+    await fsSet("records/"+u.pid,{data:JSON.stringify({rec,log}),updated:now});
+    await fsSet("profiles/"+u.pid,{name:u.name,stats:JSON.stringify(st),updated:now,hidden:"0"});
+    u.st=st;u.updated=now;setSync(dirty?"saving":"ok")}
+  catch(e){dirty=true;ok=false;setSync("err");clearTimeout(flushT);flushT=setTimeout(flush,8000)}
+  finally{flushing=false}
+  if(ok&&dirty){clearTimeout(flushT);flushT=setTimeout(flush,300)}
+  return ok}
+function parseUser(d){let st=null;try{st=JSON.parse(fv(d,"stats"))}catch(e){}
+  return{pid:d.name.split("/").pop(),name:fv(d,"name")||"?",updated:fv(d,"updated"),st}}
+async function loadUsers(){usersState="load";if(view==="users"||view==="ranking")render();
+  try{const j=await fsList("profiles");users=(j.documents||[]).map(parseUser).filter(u=>u.st);
+    users.sort((a,b)=>a.name.localeCompare(b.name,"ja",{numeric:true}));
+    if(cur){const c=users.find(u=>u.pid===cur.pid);if(c&&!dirty&&!flushing){cur.st=c.st}}
+    usersState="ok";usersErr=""}
+  catch(e){usersState="err";usersErr=String(e.message||e)}
+  if(view==="users"||view==="ranking")render()}
+async function pickUser(pid){
+  if(cur&&dirty){const ok=await flush();if(!ok){toast(false,"未保存の記録があります。接続を確認してください");return}}
+  view="loading";render();
+  try{const doc=await fsGet("records/"+pid);let R={},L=[];
+    if(doc){try{const o=JSON.parse(fv(doc,"data"));R=o.rec||{};L=o.log||[]}catch(e){}}
+    cur=users.find(u=>u.pid===pid)||cur;rec=R;log=L;dirty=false;setSync("ok");S=null;stack=[];view="home";render()}
+  catch(e){view="users";toast(false,"読み込めませんでした");render()}}
+async function createUser(name){const pid=rid(20),now=new Date().toISOString(),st=metricsOf({},[]);
+  try{await fsSet("records/"+pid,{data:'{"rec":{},"log":[]}',updated:now});
+    await fsSet("profiles/"+pid,{name,stats:JSON.stringify(st),updated:now,hidden:"0"});
+    users.push({pid,name,updated:now,st});users.sort((a,b)=>a.name.localeCompare(b.name,"ja",{numeric:true}));F.newname="";toast(true,"追加しました");render()}
+  catch(e){toast(false,"追加できませんでした")}}
+async function renameUser(u,name){try{await fsSet("profiles/"+u.pid,{name,stats:JSON.stringify(u.st),updated:u.updated||new Date().toISOString(),hidden:"0"});u.name=name;
+    users.sort((a,b)=>a.name.localeCompare(b.name,"ja",{numeric:true}));toast(true,"変更しました")}catch(e){toast(false,"変更できませんでした")}}
+function legacyUsers(){const out=[];try{const g=k=>localStorage.getItem(k),us=JSON.parse(g("akq2.users")||"null");
+    const one=(name,rk,lk)=>{let R={},L=[];try{R=JSON.parse(g(rk)||"{}");L=JSON.parse(g(lk)||"[]")}catch(e){}if(Object.keys(R).length)out.push({name,rec:R,log:L})};
+    if(us)us.forEach(u=>one(u.name,"akq2.u"+u.id+".rec","akq2.u"+u.id+".log"));else one("以前の記録","akq.rec","akq.log")}catch(e){}return out}
 function record(id,ok){
   const r=rec[id]||(rec[id]={s:"",need:0,n:0,t:0});r.n++;r.t=Date.now();
   if(ok){if(r.s==="w"){r.need--;if(r.need<=0){r.s="c";r.need=0}}else r.s="c"}
   else if(r.s!=="w"){r.s="w";r.need=2}
-  log.push([id,ok?1:0,r.t]);save();if(cur.cloud&&cloudOn())syncSoon();
+  log.push([id,ok?1:0,r.t]);if(log.length>LOGMAX)log=log.slice(-LOGMAX);save();
 }
 const wrongIds=()=>Q.filter(q=>rec[q.id]&&rec[q.id].s==="w").map(q=>q.id);
 
@@ -212,14 +213,14 @@ function parseAns(t){const m={},order=[];String(t||"").split("\n").forEach(l=>{
 function fmtQ(q,rev){const ja=parseAns(q.ja).m;
   return esc(q.q).replace(/\[\s*([A-Z])\s*\]/g,(_,k)=>rev&&ja[k]?`<span class="blank filled">${esc(ja[k])}</span>`:`<span class="blank">${k}</span>`)}
 
-let view="users",ask=null,S=null,F={edit:0,uname:"",year:"",count:20,custom:"",from:0,to:SECS.length-1,num:"all"},stack=[],resetArm=false,toastT=0;
+let view="users",ask=null,S=null,F={edit:"",uname:"",newname:"",year:"",count:20,custom:"",from:0,to:SECS.length-1,num:"all"},stack=[],resetArm=false,toastT=0;
 const $app=document.getElementById("app"),$layer=document.getElementById("layer"),$ask=document.getElementById("asklayer");
 
 function stats(){const seen=Object.keys(rec).length;let c=0,w=0;for(const k in rec){if(rec[k].s==="c")c++;else if(rec[k].s==="w")w++}
   const tot=log.length,ok=log.reduce((a,x)=>a+x[1],0);return{seen,c,w,tot,ok}}
 
 function home(){const st=stats(),rate=st.tot?Math.round(st.ok/st.tot*100)+"%":"–",wn=st.w;
-  return `<div class="top"><div class="grow"><h1>解剖過去問クイズ</h1><p class="sub">${Q.length}問 · 解答済み ${st.seen}問</p></div><button class="back" data-act="go" data-v="users">${esc(cur.name)} ⇄</button></div>
+  return `<div class="top"><div class="grow"><h1>解剖過去問クイズ</h1><p class="sub">${Q.length}問 · 解答済み ${st.seen}問</p></div><button class="back" data-act="go" data-v="users">${esc(cur.name)} ⇄</button></div><div class="meta">${syncTag()}</div>
   <div class="stats3"><div class="stat"><b>${st.tot}</b><span>解答回数</span></div><div class="stat"><b>${rate}</b><span>正答率</span></div><div class="stat"><b>${wn}</b><span>復習中</span></div></div>
   <div class="modes">
   <button class="mode" data-act="random"><span class="t"><b>ランダム(全問)</b><span>全問題をシャッフルして出題</span></span><span class="chev">›</span></button>
@@ -229,48 +230,31 @@ function home(){const st=stats(),rate=st.tot?Math.round(st.ok/st.tot*100)+"%":"�
   ${mode("cat","部位別","くびと体幹の浅層・上肢・体壁・下肢・骨盤・その他")}
   <button class="mode" data-act="wrong"><span class="t"><b>不正解のみ</b><span>2回正解すると克服扱いになります</span></span>${wn?`<span class="badge">${wn}</span>`:""}<span class="chev">›</span></button>
   </div>
-  <div class="chips" style="justify-content:center"><button class="link" data-act="go" data-v="stats">成績・バックアップ</button><button class="link" data-act="go" data-v="compare">ユーザー比較</button><button class="link" data-act="go" data-v="cloud">クラウド同期・みんなと比較</button></div>`}
+  <div class="chips" style="justify-content:center"><button class="link" data-act="go" data-v="stats">成績</button><button class="link" data-act="go" data-v="ranking">ユーザー比較</button></div>`}
 function mode(v,t,d){return `<button class="mode" data-act="go" data-v="${v}"><span class="t"><b>${t}</b><span>${d}</span></span><span class="chev">›</span></button>`}
 function head(t){return `<div class="top"><button class="back" data-act="go" data-v="home">‹ 戻る</button><h2 class="grow">${t}</h2></div>`}
 
-function vUsers(){const last=+store.get("akq2.last");
-  const rows=users.map(u=>{const m=metrics(u),rate=m.tot?Math.round(m.ok/m.tot*100)+"%":"–";
-    if(F.edit===u.id)return `<div class="panel"><label class="f">名前<input id="uname" type="text" maxlength="12" value="${esc(F.uname)}" data-bind="uname"></label><div class="row2"><button class="btn" data-act="uedit" data-id="0">キャンセル</button><button class="btn pri" data-act="usave">保存</button></div></div>`;
-    return `<div class="urow"><button class="mode" data-act="pick" data-id="${u.id}"><span class="t"><b>${esc(u.name)}${u.id===last?' <span class="tag">前回</span>':""}</b><span>解答済み ${m.seen}問 · 正答率 ${rate} · 復習中 ${m.w}${u.cloud?" · クラウド共有中":""}</span></span><span class="chev">›</span></button><button class="back" data-act="uedit" data-id="${u.id}" aria-label="名前を変更">名前</button></div>`}).join("");
-  return `<div><h1>解剖過去問クイズ</h1><p class="sub">ユーザーを選んでください。記録はユーザーごとに保存されます。</p></div><div class="modes">${rows}</div>
-  ${users.length<6?`<button class="btn" data-act="adduser">ユーザーを追加</button>`:""}${users.length>1?`<button class="link" data-act="cmp0">ユーザー比較</button>`:""}`}
-function vCompare(){const ms=users.map(metrics),pct=(a,b)=>b?Math.round(a/b*100):null;
-  const best=vals=>{const n=vals.filter(v=>v!=null);if(n.length<2)return vals.map(()=>"");const mx=Math.max(...n);return vals.map(v=>v!=null&&v===mx&&n.some(x=>x!==mx)?"best":"")};
-  const row=(label,vals,fmt)=>{const b=best(vals);return `<tr><td>${label}</td>${vals.map((v,i)=>`<td class="${b[i]}">${v==null?"–":fmt?fmt(v):v}</td>`).join("")}</tr>`};
-  const pf=v=>v+"%",th=`<tr><th></th>${users.map(u=>`<th>${esc(u.name)}</th>`).join("")}</tr>`;
-  return `<div class="top"><button class="back" data-act="go" data-v="${cur?"home":"users"}">‹ 戻る</button><h2 class="grow">ユーザー比較</h2></div>
-  <div class="panel tw"><table>${th}${row("解答済み(問)",ms.map(m=>m.seen))}${row("正解扱い(問)",ms.map(m=>m.c))}${row("復習中(問)",ms.map(m=>m.w),null).replace(/ class="best"/g,"")}${row("解答回数",ms.map(m=>m.tot))}${row("正答率",ms.map(m=>pct(m.ok,m.tot)),pf)}</table></div>
-  <div class="panel tw"><h2>部位別の正答率</h2><table>${th}${CATS.map(c=>row(c,ms.map(m=>pct(m.cats[c].k,m.cats[c].a)),pf)).join("")}</table></div>
-  <div class="panel tw"><h2>部位別の解答済み(問)</h2><table>${th}${CATS.map(c=>row(c,ms.map(m=>m.cats[c].s))).join("")}</table></div>
-  <p class="sub">濃く表示された数値が、その行で最も高い値です。正答率は累計の解答回数で計算しています。</p>
-  ${cloudOn()?`<button class="btn" data-act="go" data-v="ranking">クラウド上のみんなと比較</button>`:""}`}
-function vCloud(){const u=cur;
-  if(!cloudOn())return head("クラウド同期")+`<div class="panel"><p>クラウド保存はこのバージョンでは使えません。GitHub で公開しているアプリ(スマホのホーム画面に追加したもの)から使ってください。</p></div>`;
-  const when=u.last?new Date(u.last).toLocaleString("ja-JP"):"まだ同期していません";
-  return head("クラウド同期 · "+esc(u.name))+`<div class="panel"><h2>共有の設定</h2>
-  <p class="sub">オンにすると、このユーザーの解答履歴がクラウドにバックアップされ、名前と成績(解答済み数・正答率・部位別の正答率)がほかの人にも見えるようになります。個々の解答の中身は公開されません。</p>
-  <button class="btn ${u.cloud?"":"pri"}" data-act="cloud-toggle">${u.cloud?"共有をやめる(成績を非表示にする)":"クラウド同期と共有を始める"}</button>
-  ${u.cloud?`<p class="sub">状態: 共有中 · 最終同期 ${esc(when)}${u.err?` · <span style="color:var(--ng)">エラー ${esc(u.err)}</span>`:""}</p><button class="btn" data-act="cloud-sync">今すぐ同期</button>`:""}</div>
-  ${u.cloud?`<div class="panel"><h2>別の端末で続ける</h2><p class="sub">この引き継ぎコードを、別の端末の「記録を復元」に入力すると、同じ記録を引き継げます。ほかの人には教えないでください。</p><textarea id="mycode" readonly style="min-height:56px">${esc(u.code)}</textarea><button class="btn" data-act="cloud-copy">コードをコピー</button></div>`:""}
-  <div class="panel"><h2>記録を復元</h2><p class="sub">別の端末で表示した引き継ぎコードを入力します。いまの記録は消えず、クラウドの記録と統合されます。</p>
-  <input id="rcode" type="text" autocomplete="off" autocapitalize="off" placeholder="引き継ぎコード" value="${esc(F.rcode||"")}" data-bind="rcode" style="width:100%;min-height:48px;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:0 12px">
-  <button class="btn" data-act="cloud-restore">復元して同期</button></div>
-  <button class="mode" data-act="go" data-v="ranking"><span class="t"><b>みんなと比較</b><span>共有中のユーザーの成績を見る</span></span><span class="chev">›</span></button>`}
-function vRanking(){const mine=new Set(users.map(u=>u.pid).filter(Boolean));
-  const pct=(a,b)=>b?Math.round(a/b*100):null,key=F.rsort||"rate";
-  const rows=RK.list.map(x=>({x,rate:pct(x.st.ok,x.st.tot),seen:x.st.seen,c:x.st.c,tot:x.st.tot}));
+function vUsers(){const h=`<div><h1>解剖過去問クイズ</h1><p class="sub">ユーザーを選んでください。記録はクラウド(Firebase)に保存されます。</p></div>`;
+  if(!cloudOn())return h+`<div class="panel"><p>このバージョンはクラウドに接続できません。GitHub で公開しているアプリを開いてください。</p></div>`;
+  if(usersState==="load"&&!users.length)return h+`<p class="empty">読み込み中…</p>`;
+  if(usersState==="err"&&!users.length)return h+`<p class="empty">読み込めませんでした(${esc(usersErr)})</p><button class="btn" data-act="rk-reload">再読み込み</button>`;
+  const rows=users.map(u=>{const m=u.st,rate=m.tot?Math.round(m.ok/m.tot*100)+"%":"–";
+    if(F.edit===u.pid)return `<div class="panel"><label class="f">名前<input id="uname" type="text" maxlength="12" value="${esc(F.uname)}" data-bind="uname"></label><div class="row2"><button class="btn" data-act="uedit" data-id="0">キャンセル</button><button class="btn pri" data-act="usave">保存</button></div></div>`;
+    return `<div class="urow"><button class="mode" data-act="pick" data-id="${esc(u.pid)}"><span class="t"><b>${esc(u.name)}</b><span>解答済み ${m.seen}問 · 正答率 ${rate} · 復習中 ${m.w}</span></span><span class="chev">›</span></button><button class="back" data-act="uedit" data-id="${esc(u.pid)}" aria-label="名前を変更">名前</button></div>`}).join("");
+  return h+`<div class="modes">${rows}</div>
+  ${users.length<20?`<div class="panel"><label class="f">新しいユーザー<input id="newname" type="text" maxlength="12" placeholder="名前" value="${esc(F.newname)}" data-bind="newname"></label><button class="btn" data-act="adduser">ユーザーを追加</button></div>`:""}
+  <button class="link" data-act="go" data-v="ranking">ユーザー比較</button>`}
+function vRanking(){const pct=(a,b)=>b?Math.round(a/b*100):null,key=F.rsort||"rate",me=cur&&cur.pid;
+  const rows=users.map(u=>({u,rate:pct(u.st.ok,u.st.tot),seen:u.st.seen,c:u.st.c,tot:u.st.tot}));
   rows.sort((a,b)=>(b[key]??-1)-(a[key]??-1));
   const top=rows.length?rows[0][key]:null;
-  const body=!cloudOn()?`<p class="empty">クラウド保存は設定されていません。</p>`:RK.state==="load"?`<p class="empty">読み込み中…</p>`:RK.state==="err"?`<p class="empty">読み込みに失敗しました(${esc(RK.err)})</p>`:!rows.length?`<p class="empty">共有中のユーザーはまだいません。</p>`:
-   `<div class="panel tw"><table><tr><th>名前</th><th>解答済</th><th>正解扱</th><th>回数</th><th>正答率</th></tr>${rows.map(r=>`<tr><td>${esc(r.x.name||"?")}${mine.has(r.x.pid)?' <span class="tag">あなた</span>':""}</td><td>${r.seen}</td><td>${r.c}</td><td>${r.tot}</td><td class="${r[key]===top&&rows.length>1?"best":""}">${r.rate==null?"–":r.rate+"%"}</td></tr>`).join("")}</table></div>
-   <div class="panel tw"><h2>部位別の正答率</h2><table><tr><th>名前</th>${CATS.map(c=>`<th>${c.replace("くびと体幹の浅層","くび体幹")}</th>`).join("")}</tr>${rows.map(r=>`<tr><td>${esc(r.x.name||"?")}</td>${CATS.map(c=>{const b=(r.x.st.cats||{})[c];const v=b?pct(b.k,b.a):null;return `<td>${v==null?"–":v+"%"}</td>`}).join("")}</tr>`).join("")}</table></div>`;
-  return head("みんなと比較")+`<div class="row2"><label class="f">並び順<select id="rsort" data-bind="rsort">${[["rate","正答率"],["seen","解答済み"],["c","正解扱い"],["tot","解答回数"]].map(o=>`<option value="${o[0]}" ${key===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select></label><button class="btn" data-act="rk-reload" style="align-self:end">更新</button></div>${body}
-  <p class="sub">共有をオンにしたユーザーだけが表示されます。正答率は累計の解答回数で計算しています。</p>`}
+  const body=!cloudOn()?`<p class="empty">クラウドに接続できません。</p>`:usersState==="load"?`<p class="empty">読み込み中…</p>`:usersState==="err"?`<p class="empty">読み込めませんでした(${esc(usersErr)})</p>`:!rows.length?`<p class="empty">ユーザーがいません。</p>`:
+   `<div class="panel tw"><table><tr><th>名前</th><th>解答済</th><th>正解扱</th><th>回数</th><th>正答率</th></tr>${rows.map(r=>`<tr><td>${esc(r.u.name)}${r.u.pid===me?' <span class="tag">あなた</span>':""}</td><td>${r.seen}</td><td>${r.c}</td><td>${r.tot}</td><td class="${r[key]===top&&rows.length>1?"best":""}">${r.rate==null?"–":r.rate+"%"}</td></tr>`).join("")}</table></div>
+   <div class="panel tw"><h2>部位別の正答率</h2><table><tr><th>名前</th>${CATS.map(c=>`<th>${c.replace("くびと体幹の浅層","くび体幹")}</th>`).join("")}</tr>${rows.map(r=>`<tr><td>${esc(r.u.name)}</td>${CATS.map(c=>{const b=(r.u.st.cats||{})[c];const v=b?pct(b.k,b.a):null;return `<td>${v==null?"–":v+"%"}</td>`}).join("")}</tr>`).join("")}</table></div>
+   <div class="panel tw"><h2>部位別の解答済み(問)</h2><table><tr><th>名前</th>${CATS.map(c=>`<th>${c.replace("くびと体幹の浅層","くび体幹")}</th>`).join("")}</tr>${rows.map(r=>`<tr><td>${esc(r.u.name)}</td>${CATS.map(c=>`<td>${(r.u.st.cats||{})[c]?r.u.st.cats[c].s:0}</td>`).join("")}</tr>`).join("")}</table></div>`;
+  return `<div class="top"><button class="back" data-act="go" data-v="${cur?"home":"users"}">‹ 戻る</button><h2 class="grow">ユーザー比較</h2></div>
+  <div class="row2"><label class="f">並び順<select id="rsort" data-bind="rsort">${[["rate","正答率"],["seen","解答済み"],["c","正解扱い"],["tot","解答回数"]].map(o=>`<option value="${o[0]}" ${key===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select></label><button class="btn" data-act="rk-reload" style="align-self:end">更新</button></div>${body}
+  <p class="sub">正答率は累計の解答回数で計算しています。</p>`}
 function vYear(){const ys={};Q.forEach(q=>{const k=yearKey(q);ys[k]=(ys[k]||0)+1});
   const keys=Object.keys(ys),tot=keys.filter(k=>!k.endsWith("再")).sort(),sai=keys.filter(k=>k.endsWith("再")).sort();
   const chips=a=>a.map(k=>`<button class="chip ${F.year===k?"on":""}" data-act="year" data-k="${k}">${2000+parseInt(k,10)}</button>`).join("");
@@ -294,12 +278,12 @@ function vCat(){const cnt={};CATS.forEach(c=>cnt[c]=0);Q.forEach(q=>cnt[catOf(q)
 function vStats(){const by={};CATS.forEach(c=>by[c]={t:0,s:0,c:0,w:0});
   Q.forEach(q=>{const b=by[catOf(q)];b.t++;const r=rec[q.id];if(r){b.s++;if(r.s==="c")b.c++;else if(r.s==="w")b.w++}});
   const st=stats();
-  return head("成績 · "+esc(cur.name))+`<div class="stats3"><div class="stat"><b>${st.seen}<small style="font-size:.9rem">/${Q.length}</small></b><span>解答済み</span></div><div class="stat"><b>${st.c}</b><span>正解扱い</span></div><div class="stat"><b>${st.w}</b><span>復習中</span></div></div>
+  return head("成績 · "+esc(cur.name))+`<div class="meta">${syncTag()}</div><div class="stats3"><div class="stat"><b>${st.seen}<small style="font-size:.9rem">/${Q.length}</small></b><span>解答済み</span></div><div class="stat"><b>${st.c}</b><span>正解扱い</span></div><div class="stat"><b>${st.w}</b><span>復習中</span></div></div>
   <div class="panel tw"><table><tr><th>部位</th><th>問題</th><th>解答済</th><th>正解扱</th><th>復習中</th></tr>${CATS.map(c=>{const b=by[c];return `<tr><td>${c}</td><td>${b.t}</td><td>${b.s}</td><td>${b.c}</td><td>${b.w}</td></tr>`}).join("")}</table></div>
-  <div class="panel"><h2>バックアップ</h2><p class="sub">記録はこの端末のブラウザに、ユーザーごとに保存されます。ここに表示されるのは現在のユーザーの記録です。別の端末へ移すときは、下の文字列をコピーして、移行先の欄に貼り付けて「読み込む」を押してください。</p>
-  <textarea id="bk" readonly>${esc(JSON.stringify({rec,log}))}</textarea><button class="btn" data-act="copy">コピー</button>
-  <textarea id="imp" placeholder="ここに貼り付け"></textarea><button class="btn" data-act="import">読み込む</button></div>
-  <button class="btn ${resetArm?"ng":""}" data-act="reset">${resetArm?"本当に「"+esc(cur.name)+"」の記録を消去する(もう一度押す)":"このユーザーの記録を消去"}</button>`}
+  ${legacyPanel()}`}
+function legacyPanel(){const L=legacyUsers();if(!L.length)return"";
+  return `<div class="panel"><h2>この端末に残っている以前の記録</h2><p class="sub">以前このブラウザに保存されていた記録です。現在のユーザー「${esc(cur.name)}」の記録に統合してクラウドへ保存します。統合しても、この端末の記録は削除されません。</p>${L.map((l,i)=>`<button class="btn" data-act="legacy" data-i="${i}">${esc(l.name)}(${Object.keys(l.rec).length}問)を統合</button>`).join("")}</div>`}
+
 
 function cardHTML(st){const q=byId[st.id],r=rec[q.id],a=parseAns(q.ja),l=parseAns(q.la);
   const sec=secOf(q);
@@ -315,7 +299,7 @@ function cardHTML(st){const q=byId[st.id],r=rec[q.id],a=parseAns(q.ja),l=parseAn
 
 function vQuiz(){const st=S.card,n=S.queue.length;
   return `<div class="quizbar"><button class="back" data-act="quit" aria-label="終了">✕</button><div class="prog"><div class="bar"><i style="width:${S.i/n*100}%"></i></div></div><small>${S.i+1} / ${n}</small></div>
-  <div class="meta"><span class="tag">${esc(S.label)}</span></div>
+  <div class="meta"><span class="tag">${esc(S.label)}</span>${syncTag()}</div>
   ${cardHTML(st)}
   ${st.rev?`<div class="actions"><button class="btn ng" data-act="ng">✕ 不正解</button><button class="btn ok" data-act="ok">○ 正解</button></div>`
     :`<div class="actions one"><button class="btn pri" data-act="reveal">答えを見る</button></div><button class="skip" data-act="skip">スキップ</button>`}`}
@@ -326,7 +310,7 @@ function vResult(){const n=S.res.length,ok=S.res.filter(x=>x.ok).length,miss=S.r
   ${miss.length?`<div class="missed"><h2>不正解 ${miss.length}問</h2>${miss.map(x=>`<button data-act="open" data-id="${esc(x.id)}"><span class="tag">${esc(x.id)}</span><span class="qt">${esc(byId[x.id].q.replace(/\s+/g," "))}</span></button>`).join("")}</div>`:`<p class="empty">全問正解です。</p>`}
   <div class="modes">${miss.length?`<button class="btn pri" data-act="redo-miss">不正解だけもう一度</button>`:""}<button class="btn" data-act="redo">同じ条件で最初から</button><button class="btn" data-act="go" data-v="home">ホームへ</button></div>`}
 
-function render(){const v={cloud:vCloud,ranking:vRanking,users:vUsers,compare:vCompare,home,year:vYear,count:vCount,section:vSection,cat:vCat,stats:vStats,quiz:vQuiz,result:vResult}[view];
+function render(){const v={loading:()=>`<p class="empty">読み込み中…</p>`,ranking:vRanking,users:vUsers,home,year:vYear,count:vCount,section:vSection,cat:vCat,stats:vStats,quiz:vQuiz,result:vResult}[view];
   const y=window.scrollY;$app.innerHTML=v();if(view==="home"||view==="quiz"||view==="result")window.scrollTo(0,0);else window.scrollTo(0,y)}
 function sheetRender(){if(!stack.length){$layer.innerHTML="";return}const st=stack[stack.length-1];
   $layer.innerHTML=`<div class="sheet" data-act="sheet-bg"><div class="in" role="dialog" aria-label="類題"><div class="hd"><button class="back" data-act="sheet-back">${stack.length>1?"‹ 戻る":"閉じる"}</button>${stack.length>1?`<button class="back" data-act="sheet-close">閉じる</button>`:""}</div>
@@ -353,22 +337,17 @@ const allIds=()=>Q.map(q=>q.id);
 document.addEventListener("click",e=>{const t=e.target.closest("[data-act]");if(!t)return;const a=t.dataset.act,d=t.dataset;
   if(a==="sheet-bg"){if(e.target===t){stack=[];sheetRender()}return}
   switch(a){
-  case"go":view=d.v;resetArm=false;render();if(view==="ranking")loadRanking();break;
-  case"cloud-toggle":{if(!cloudOn())break;if(cur.cloud){unshare(cur).then(()=>{toast(true,"共有をやめました");render()})}else{cur.cloud=true;ensureIds(cur);saveUsers();render();runSync(cur,true)}break}
-  case"cloud-sync":runSync(cur,true);break;
-  case"cloud-copy":{const el=document.getElementById("mycode");el.select();let p;try{p=navigator.clipboard.writeText(el.value)}catch(_){}
-    if(p&&p.then)p.then(()=>toast(true,"コピーしました"),()=>toast(true,"選択しました。コピーしてください"));else toast(true,"選択しました。コピーしてください");break}
-  case"cloud-restore":restoreFrom(F.rcode||"");break;
-  case"rk-reload":loadRanking();break;
+  case"go":view=d.v;render();if(view==="ranking"||view==="users")loadUsers();break;
+  case"rk-reload":loadUsers();break;
   case"random":launch("ランダム(全問)",sk=>allIds().filter(i=>!sk||!answered(i)),shuffle);break;
   case"ask-bg":if(e.target===t){ask=null;askRender()}break;
   case"ask-cancel":ask=null;askRender();break;
   case"ask-go":{const k=ask,sk=d.skip==="1";ask=null;askRender();if(!k)break;begin(k.label+(sk?"(続き)":""),()=>k.make(k.pool(sk)));break}
-  case"pick":loadUser(+d.id);S=null;stack=[];view="home";render();if(cur.cloud)runSync(cur);break;
-  case"uedit":F.edit=+d.id;{const u=users.find(x=>x.id===F.edit);F.uname=u?u.name:""}render();break;
-  case"usave":{const u=users.find(x=>x.id===F.edit),n=F.uname.trim();if(u&&n){u.name=n;saveUsers();if(cur&&cur.id===u.id)cur=u;if(u.cloud)runSync(u)}F.edit=0;render();break}
-  case"adduser":{const id=Math.max(...users.map(u=>u.id))+1;users.push({id,name:"ユーザー"+id});saveUsers();render();break}
-  case"cmp0":view="compare";cur=null;render();break;
+  case"pick":pickUser(d.id);break;
+  case"uedit":F.edit=d.id==="0"?"":d.id;{const u=users.find(x=>x.pid===F.edit);F.uname=u?u.name:""}render();break;
+  case"usave":{const u=users.find(x=>x.pid===F.edit),n=F.uname.trim();F.edit="";render();if(u&&n&&n!==u.name)renameUser(u,n).then(render);break}
+  case"adduser":{const n=(F.newname||"").trim();if(!n){toast(false,"名前を入力してください");break}createUser(n);break}
+  case"legacy":{const l=legacyUsers()[+d.i];if(!l)break;const m=mergeData(rec,log,l);rec=m.rec;log=m.log;save();toast(true,"統合しました");render();break}
   case"year":F.year=d.k;render();break;
   case"start-year":{const y=F.year;launch(yearLabel(y),sk=>Q.filter(q=>yearKey(q)===y&&(!sk||!answered(q.id))).map(q=>q.id),ids=>ids.slice().sort(cmpId));break}
   case"count":F.count=+d.n;F.custom="";render();break;
@@ -389,19 +368,15 @@ document.addEventListener("click",e=>{const t=e.target.closest("[data-act]");if(
   case"s-ok":case"s-ng":{const st=stack[stack.length-1];record(st.id,a==="s-ok");st.done=true;toast(a==="s-ok",(a==="s-ok"?"○":"✕")+" 記録しました");sheetRender();break}
   case"redo":{const rb=S.rebuild,l=S.label;if(rb().length)begin(l,rb);else{view="home";render()}break}
   case"redo-miss":{const ids=S.res.filter(x=>!x.ok).map(x=>x.id);begin("不正解だけ",()=>shuffle(ids));break}
-  case"copy":{const el=document.getElementById("bk");el.select();let p;try{p=navigator.clipboard.writeText(el.value)}catch(_){}
-    if(p&&p.then)p.then(()=>toast(true,"コピーしました"),()=>toast(true,"選択しました。コピーしてください"));else toast(true,"選択しました。コピーしてください");break}
-  case"import":{try{const o=JSON.parse(document.getElementById("imp").value.trim());if(!o||typeof o.rec!=="object")throw 0;rec=o.rec;log=Array.isArray(o.log)?o.log:[];save();toast(true,"読み込みました");render()}catch(_){toast(false,"形式が正しくありません")}break}
-  case"reset":if(!resetArm){resetArm=true;render()}else{rec={};log=[];save();resetArm=false;toast(true,"消去しました");render()}break;
   }});
-document.addEventListener("input",e=>{const t=e.target;if(t.dataset.bind==="uname"){F.uname=t.value;return}if(t.dataset.bind==="rcode"){F.rcode=t.value;return}if(t.dataset.bind==="custom"){F.custom=t.value;const b=document.querySelector('[data-act="start-count"]');
+document.addEventListener("input",e=>{const t=e.target;if(t.dataset.bind==="uname"){F.uname=t.value;return}if(t.dataset.bind==="newname"){F.newname=t.value;return}if(t.dataset.bind==="custom"){F.custom=t.value;const b=document.querySelector('[data-act="start-count"]');
   if(b){const n=F.custom?Math.max(1,parseInt(F.custom,10)||1):F.count;b.textContent=Math.min(n,Q.length)+"問をランダムに解く"}
   document.querySelectorAll('[data-act="count"]').forEach(c=>c.classList.toggle("on",!F.custom&&+c.dataset.n===F.count))}});
-document.addEventListener("change",e=>{const t=e.target,b=t.dataset.bind;if(!b||b==="custom"||b==="uname"||b==="rcode")return;F[b]=(b==="num"||b==="rsort")?t.value:+t.value;render()});
+document.addEventListener("change",e=>{const t=e.target,b=t.dataset.bind;if(!b||b==="custom"||b==="uname"||b==="newname")return;F[b]=(b==="num"||b==="rsort")?t.value:+t.value;render()});
 document.addEventListener("keydown",e=>{if(view!=="quiz"||e.target.matches("input,textarea,select"))return;
   if(!S.card.rev&&(e.key==="Enter"||e.key===" ")){e.preventDefault();S.card.rev=true;render()}
   else if(S.card.rev&&(e.key==="1"||e.key==="o")){grade(true)}else if(S.card.rev&&(e.key==="2"||e.key==="x")){grade(false)}});
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&cur&&cur.cloud&&cloudOn()){clearTimeout(syncT);runSync(cur)}});
-render();
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&cur&&dirty)flush()});
+render();if(cloudOn())loadUsers();
 })();
 </script>
