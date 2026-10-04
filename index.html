@@ -105,6 +105,18 @@ th{font-weight:500;color:var(--muted);font-size:.78rem}
 .tw{overflow-x:auto}
 textarea{width:100%;min-height:90px;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px;font-size:.8rem;font-family:ui-monospace,Menlo,monospace}
 .tag.saving{background:var(--line);color:var(--muted)}.tag.err{background:var(--ng-soft);color:var(--ng)}
+.wl{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.wl .q{font-size:1rem;line-height:1.9}.printhead{display:none}
+@media print{
+  :root{color-scheme:light}
+  body,.wrap,.wl,.panel{background:#fff!important;color:#000!important}
+  .noprint,.quizbar,.actions,.toast,.syncst{display:none!important}
+  .printhead{display:block}.wrap{padding:0;min-height:0;max-width:none}
+  .wl{border:1px solid #888!important;border-radius:0;break-inside:avoid;page-break-inside:avoid;margin-bottom:8px;box-shadow:none}
+  .wl .q,.arow .ja{color:#000!important}.tag{background:#eee!important;color:#000!important}
+  .blank.filled{background:#e6e6e6!important;color:#000!important}.arow .l{background:#ddd!important;color:#000!important}
+  .arow .la{color:#333!important}
+}
 .urow{display:flex;gap:8px;align-items:stretch}.urow .mode{flex:1;min-width:0}.urow .back{min-height:68px}
 td.best{font-weight:700;color:var(--accent)}.mode[disabled]{opacity:.5}
 .empty{color:var(--muted);text-align:center;padding:24px 8px}
@@ -268,6 +280,24 @@ function vRanking(){const pct=(a,b)=>b?Math.round(a/b*100):null,key=F.rsort||"ra
   return `<div class="top"><button class="back" data-act="go" data-v="${cur?"home":"users"}">‹ 戻る</button><h2 class="grow">ユーザー比較</h2></div>
   <div class="row2"><label class="f">並び順<select id="rsort" data-bind="rsort">${[["rate","正答率"],["seen","解答済み"],["c","正解扱い"],["tot","解答回数"]].map(o=>`<option value="${o[0]}" ${key===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select></label><button class="btn" data-act="rk-reload" style="align-self:end">更新</button></div>${body}
   <p class="sub">正答率は累計の解答回数で計算しています。</p>`}
+function wrongByCat(){const by={};CATS.forEach(c=>by[c]=[]);wrongIds().forEach(i=>by[catOf(byId[i])].push(i));return by}
+function vWrong(){const by=wrongByCat(),n=CATS.reduce((a,c)=>a+by[c].length,0);
+  return head("不正解のみ")+`<div class="meta">${syncTag()}</div>
+  ${n?`<div class="modes"><button class="mode" data-act="wrong-go" data-c=""><span class="t"><b>ランダム</b><span>不正解の全${n}問をシャッフルして出題</span></span><span class="chev">›</span></button></div>
+  <p class="grp">部位別に解き直す</p><div class="modes">${CATS.map(c=>`<button class="mode" data-act="wrong-go" data-c="${c}" ${by[c].length?"":"disabled"}><span class="t"><b>${c}</b><span>${by[c].length}問</span></span><span class="chev">›</span></button>`).join("")}</div>
+  <button class="btn" data-act="go" data-v="wronglist">不正解問題の一覧を見る(PDF保存)</button>`:`<p class="empty">不正解の問題はありません。</p>`}`}
+function vWrongList(){const by=wrongByCat(),cat=F.wcat||"",cats=cat?[cat]:CATS;
+  const items=[];cats.forEach(c=>by[c].slice().sort((a,b)=>{const x=secIdx[secOf(byId[a])]??999,y=secIdx[secOf(byId[b])]??999;return x-y||cmpFull(a,b)}).forEach(i=>items.push(i)));
+  const total=CATS.reduce((a,c)=>a+by[c].length,0),d=new Date().toLocaleDateString("ja-JP");
+  const item=i=>{const q=byId[i],r=rec[i],a=parseAns(q.ja),l=parseAns(q.la);
+    return `<div class="wl"><div class="meta"><span class="tag">${esc(q.id)}</span>${q.page?`<span class="tag">p.${esc(q.page)}</span>`:""}${q.sec&&q.sec!=="不明"?`<span class="tag">§${esc(q.sec)} ${esc(secTitle(secOf(q)))}</span>`:""}<span class="tag rev">あと${r?r.need:2}回</span></div>
+    <p class="q">${fmtQ(q,true)}</p><div class="ans">${a.order.length?a.order.map(k=>`<div class="arow"><span class="l">${k}</span><span><span class="ja">${esc(a.m[k])}</span>${l.m[k]?`<span class="la">${esc(l.m[k])}</span>`:""}</span></div>`).join(""):`<div class="ja">${esc(a.raw)}</div>`}</div></div>`};
+  return `<div class="top noprint"><button class="back" data-act="go" data-v="wrongmode">‹ 戻る</button><h2 class="grow">不正解の一覧</h2></div>
+  <div class="chips noprint"><button class="chip ${cat?"":"on"}" data-act="wl-cat" data-c="">すべて(${total})</button>${CATS.map(c=>`<button class="chip ${cat===c?"on":""}" data-act="wl-cat" data-c="${c}">${c}(${by[c].length})</button>`).join("")}</div>
+  <button class="btn pri noprint" data-act="wl-print" ${items.length?"":"disabled"}>PDFで保存(印刷)</button>
+  <p class="sub noprint">「PDFで保存」を押し、印刷画面で「PDFとして保存」を選んでください。iPhone・iPad では、プレビューをピンチアウトして共有ボタンから保存できます。ホーム画面から開いたアプリで動かないときは、Safari で開いてください。</p>
+  <div class="printhead"><h2>解剖過去問 不正解一覧 · ${esc(cur.name)}</h2><p class="sub">${d} · ${cat?esc(cat)+" · ":""}${items.length}問</p></div>
+  ${items.length?items.map(item).join(""):`<p class="empty">該当する問題はありません。</p>`}`}
 function vYear(){const ys={};Q.forEach(q=>{const k=yearKey(q);ys[k]=(ys[k]||0)+1});
   const keys=Object.keys(ys),tot=keys.filter(k=>!k.endsWith("再")).sort(),sai=keys.filter(k=>k.endsWith("再")).sort();
   const chips=a=>a.map(k=>`<button class="chip ${F.year===k?"on":""}" data-act="year" data-k="${k}">${2000+parseInt(k,10)}</button>`).join("");
@@ -324,7 +354,7 @@ function vResult(){const n=S.res.length,ok=S.res.filter(x=>x.ok).length,miss=S.r
   ${miss.length?`<div class="missed"><h2>不正解 ${miss.length}問</h2>${miss.map(x=>`<button data-act="open" data-id="${esc(x.id)}"><span class="tag">${esc(x.id)}</span><span class="qt">${esc(byId[x.id].q.replace(/\s+/g," "))}</span></button>`).join("")}</div>`:`<p class="empty">全問正解です。</p>`}
   <div class="modes">${miss.length?`<button class="btn pri" data-act="redo-miss">不正解だけもう一度</button>`:""}<button class="btn" data-act="redo">同じ条件で最初から</button><button class="btn" data-act="go" data-v="home">ホームへ</button></div>`}
 
-function render(){const v={loading:()=>`<p class="empty">読み込み中…</p>`,ranking:vRanking,users:vUsers,home,year:vYear,count:vCount,section:vSection,cat:vCat,stats:vStats,quiz:vQuiz,result:vResult}[view];
+function render(){const v={wrongmode:vWrong,wronglist:vWrongList,loading:()=>`<p class="empty">読み込み中…</p>`,ranking:vRanking,users:vUsers,home,year:vYear,count:vCount,section:vSection,cat:vCat,stats:vStats,quiz:vQuiz,result:vResult}[view];
   const y=window.scrollY;$app.innerHTML=v();if(view==="home"||view==="quiz"||view==="result")window.scrollTo(0,0);else window.scrollTo(0,y)}
 function sheetRender(){if(!stack.length){$layer.innerHTML="";return}const st=stack[stack.length-1];
   $layer.innerHTML=`<div class="sheet" data-act="sheet-bg"><div class="in" role="dialog" aria-label="類題"><div class="hd"><button class="back" data-act="sheet-back">${stack.length>1?"‹ 戻る":"閉じる"}</button>${stack.length>1?`<button class="back" data-act="sheet-close">閉じる</button>`:""}</div>
@@ -369,7 +399,10 @@ document.addEventListener("click",e=>{const t=e.target.closest("[data-act]");if(
   case"start-section":{const a1=Math.min(F.from,F.to),b1=Math.max(F.from,F.to),num=F.num;
     launch("§"+SECS[a1].id+"–§"+SECS[b1].id,sk=>secPool().filter(i=>!sk||!answered(i)),ids=>take(ids,num==="all"?ids.length:+num));break}
   case"cat":{const c=d.c;launch(c,sk=>Q.filter(q=>catOf(q)===c&&(!sk||!answered(q.id))).map(q=>q.id),shuffle);break}
-  case"wrong":{const ids=wrongIds();if(!ids.length){toast(true,"不正解の問題はありません");break}begin("不正解のみ",()=>shuffle(wrongIds()));break}
+  case"wrong":{if(!wrongIds().length){toast(true,"不正解の問題はありません");break}view="wrongmode";render();break}
+  case"wrong-go":{const c=d.c;if(!wrongIds().filter(i=>!c||catOf(byId[i])===c).length)break;begin(c?"不正解 · "+c:"不正解 · ランダム",()=>shuffle(wrongIds().filter(i=>!c||catOf(byId[i])===c)));break}
+  case"wl-cat":F.wcat=d.c;render();break;
+  case"wl-print":try{window.print()}catch(e){toast(false,"印刷画面を開けませんでした")}break;
   case"reveal":S.card.rev=true;render();window.scrollTo(0,0);break;
   case"ok":grade(true);break;case"ng":grade(false);break;
   case"skip":advance();break;
