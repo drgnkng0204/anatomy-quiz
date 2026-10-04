@@ -135,8 +135,8 @@ const nrm=s=>String(s||"").replace(/\s+/g,"").toLowerCase();
 const ordKey=id=>{const p=idParts(id);return[parseInt(p.y,10)||0,p.sai?1:0,p.n,p.s]};
 const cmpFull=(a,b)=>{const x=ordKey(a),y=ordKey(b);for(let i=0;i<3;i++)if(x[i]!==y[i])return x[i]-y[i];return x[3].localeCompare(y[3])};
 const canon={},members={};
-{const g={};QALL.forEach(q=>{const k=nrm(q.q)+"\u0001"+nrm(q.ja);(g[k]||(g[k]=[])).push(q.id)});
- for(const k in g){const ids=g[k].slice().sort(cmpFull);ids.forEach(i=>{canon[i]=ids[0]});members[ids[0]]=ids}}
+QALL.forEach(q=>{const c=q.c||q.id;canon[q.id]=c;(members[c]||(members[c]=[])).push(q.id)});
+for(const c in members)members[c].sort(cmpFull);
 const Q=QALL.filter(q=>canon[q.id]===q.id);
 function normRec(R){const out={};for(const id in R){const c=canon[id]||id,r=R[id];
   if(!out[c])out[c]=Object.assign({},r);else{const o=out[c],n=(o.n||0)+(r.n||0);if((r.t||0)>(o.t||0))Object.assign(o,r);o.n=n}}return out}
