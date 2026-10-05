@@ -2,7 +2,10 @@ import openpyxl, json, re
 from pathlib import Path
 d=Path(__file__).parent
 old=json.loads((d/'data.json').read_text(encoding='utf-8'))
-secs=old['secs']
+EXCL=(29,52)
+full=json.loads((d/'secs_full.json').read_text(encoding='utf-8'))
+sn=lambda i:int(re.match(r'\d+',i).group())
+secs=[x for x in full if not EXCL[0]<=sn(x['id'])<=EXCL[1]]
 wb=openpyxl.load_workbook(d.parent/'解剖学_過去問対応表.xlsx',data_only=True);ws=wb.active
 rows=[]
 for r in range(2,ws.max_row+1):
@@ -11,7 +14,11 @@ for r in range(2,ws.max_row+1):
     sec=str(v[7]).strip() if v[7] is not None else ''
     rows.append(dict(id=str(v[0]).strip(),q=v[1] or '',ja=v[2] or '',la=v[3] or '',yr=str(v[4] or ''),
         sib=[s.strip() for s in str(v[5] or '').split(',') if s.strip()],page=str(v[6] or ''),sec=sec))
+n0=len(rows)
+rows=[x for x in rows if not(re.match(r'\d+',x['sec'] or '') and EXCL[0]<=sn(x['sec'])<=EXCL[1])]
 ids={x['id'] for x in rows}
+for x in rows: x['sib']=[t for t in x['sib'] if t in ids]
+print('excluded',n0-len(rows),'of',n0)
 print('rows',len(rows),'missing sib',sorted({s for x in rows for s in x['sib'] if s not in ids})[:5])
 secids={s['id'] for s in secs}
 print('bad sec',[x['id']+':'+x['sec'] for x in rows if x['sec'].split('-')[0] not in secids])

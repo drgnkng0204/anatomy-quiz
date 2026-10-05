@@ -132,7 +132,7 @@ const DATA=/*DATA*/null;
 const QALL=DATA.q,SECS=DATA.secs,byId={},secIdx={};
 QALL.forEach(q=>{byId[q.id]=q});SECS.forEach((s,i)=>{secIdx[s.id]=i});
 const CATS=["くびと体幹の浅層","上肢","体壁","下肢","骨盤","その他"];
-const CATDESC={"くびと体幹の浅層":"§1–10","上肢":"§11–25","体壁":"§26–34","下肢":"§53–63","骨盤":"§64–71","その他":"胸腔・腹腔・あたま・脳など"};
+const CATDESC={"くびと体幹の浅層":"§1–10","上肢":"§11–25","体壁":"§26–28","下肢":"§53–63","骨盤":"§64–71","その他":"あたま・脳など"};
 const secOf=q=>q.sec?q.sec.split("-")[0]:"";
 const secTitle=id=>(secIdx[id]!==undefined?SECS[secIdx[id]].t:"");
 function catOf(q){const s=secOf(q);if(!(s in secIdx))return"その他";const n=parseInt(s,10);
@@ -168,7 +168,7 @@ const LOGMAX=4000;
 let users=[],usersState="load",usersErr="",cur=null,rec={},log=[];
 let dirty=false,flushing=false,flushT=0,syncState="ok";
 const answered=id=>!!rec[canon[id]||id];
-function metricsOf(R,L){const m={seen:0,c:0,w:0,tot:L.length,ok:L.reduce((a,x)=>a+x[1],0),cats:{}};
+function metricsOf(R,L){L=L.filter(x=>byId[x[0]]);const m={seen:0,c:0,w:0,tot:L.length,ok:L.reduce((a,x)=>a+x[1],0),cats:{}};
   CATS.forEach(c=>m.cats[c]={s:0,c:0,a:0,k:0});
   Q.forEach(q=>{const r=R[q.id];if(r){m.seen++;const b=m.cats[catOf(q)];b.s++;if(r.s==="c"){m.c++;b.c++}else if(r.s==="w")m.w++}});
   L.forEach(x=>{const q=byId[x[0]];if(q){const b=m.cats[catOf(q)];b.a++;b.k+=x[1]}});return m}
@@ -238,8 +238,8 @@ function fmtQ(q,rev){const ja=parseAns(q.ja).m;
 let view="users",ask=null,S=null,F={edit:"",uname:"",newname:"",year:"",count:20,custom:"",from:0,to:SECS.length-1,num:"all"},stack=[],resetArm=false,toastT=0;
 const $app=document.getElementById("app"),$layer=document.getElementById("layer"),$ask=document.getElementById("asklayer");
 
-function stats(){const seen=Object.keys(rec).length;let c=0,w=0;for(const k in rec){if(rec[k].s==="c")c++;else if(rec[k].s==="w")w++}
-  const tot=log.length,ok=log.reduce((a,x)=>a+x[1],0);return{seen,c,w,tot,ok}}
+function stats(){let seen=0,c=0,w=0;for(const k in rec){if(!byId[k])continue;seen++;if(rec[k].s==="c")c++;else if(rec[k].s==="w")w++}
+  const L=log.filter(x=>byId[x[0]]),tot=L.length,ok=L.reduce((a,x)=>a+x[1],0);return{seen,c,w,tot,ok}}
 
 function home(){const st=stats(),rate=st.tot?Math.round(st.ok/st.tot*100)+"%":"–",wn=st.w;
   return `<div class="top"><div class="grow"><h1>解剖過去問クイズ</h1><p class="sub">${Q.length}問 · 解答済み ${st.seen}問</p></div><button class="back" data-act="go" data-v="users">${esc(cur.name)} ⇄</button></div><div class="meta">${syncTag()}</div>
